@@ -298,7 +298,10 @@ python checkin_accounts.py upload --message "docs: 更新使用手册"
 
 ### 7.2 需要注意的限制
 
-- `upload` 只同步文件内容，**不同步删除操作**。若在本地删除文件，需到网页端手动删除。
+- `upload` 只同步文件内容，**不会自动同步删除操作**。删除仓库文件需显式指定：
+  ```bash
+  python checkin_accounts.py upload --delete 文件名 --message "移除 xxx"
+  ```
 - `.github/workflows/` 下的两个定时任务文件被 `upload` 默认跳过（GitHub 要求单独的 Workflows 权限）。修改定时计划请直接在网页编辑器操作。
 - 仓库中的副本仅供查阅与备份，**不要在网页端和本地两端同时修改同一文件**，否则后上传的会覆盖先前的。
 
