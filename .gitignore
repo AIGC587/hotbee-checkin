@@ -1,0 +1,10 @@
+# 令牌 / 凭据，绝不入库
+*.secret.json
+**/checkin-rt*.json
+.wb/
+checkin.log
+
+# 本地杂项
+__pycache__/
+*.pyc
+.workbuddy/
