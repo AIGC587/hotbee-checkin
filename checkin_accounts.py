@@ -825,10 +825,17 @@ def cmd_upload(a):
         sys.stderr.write("未配置 PAT，先 token set\n")
         return 1
     import urllib.parse
-    files = list(_iter_project_files())
+    files = []
+    skipped_wf = 0
+    for full, rel in _iter_project_files():
+        if rel.startswith(".github/workflows/") and not getattr(a, "include_workflows", False):
+            skipped_wf += 1
+            continue
+        files.append((full, rel))
     if a.dry_run:
         print(json.dumps({"status": "ok", "dry_run": True,
-                          "files": [rel for _f, rel in files]},
+                          "files": [rel for _f, rel in files],
+                          "skipped_workflows": skipped_wf},
                          ensure_ascii=False, indent=2))
         return 0
     results, failed = [], 0
@@ -856,6 +863,9 @@ def cmd_upload(a):
     print(json.dumps({
         "status": "ok" if failed == 0 else "partial",
         "total": len(results), "failed": failed, "results": results,
+        "skipped_workflows": skipped_wf,
+        "note": "workflow 文件需要 PAT 额外开 Workflows 权限；默认跳过，改动请用网页编辑"
+                if skipped_wf else "",
     }, ensure_ascii=False, indent=2))
     return 0 if failed == 0 else 1
 
@@ -929,6 +939,8 @@ def build_parser():
     pu2 = sp.add_parser("upload", help="把项目文件同步到 GitHub 仓库（走 API，不依赖 git）")
     pu2.add_argument("--message", help="提交说明")
     pu2.add_argument("--dry-run", action="store_true", help="只列出要上传的文件")
+    pu2.add_argument("--include-workflows", dest="include_workflows",
+                     action="store_true", help="连 .github/workflows 一起传（需 PAT 有 Workflows 权限）")
     pu2.set_defaults(fn=cmd_upload)
 
     return p
