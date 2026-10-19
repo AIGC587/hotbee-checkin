@@ -1,0 +1,28 @@
+name: HotBee 每日签到
+
+on:
+  schedule:
+    # 北京时间 00:05（UTC 前一天 16:05）
+    - cron: "5 16 * * *"
+    # 兜底：北京时间 12:00
+    - cron: "0 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: 执行签到
+        env:
+          HOTBEE_TOKEN: ${{ secrets.HOTBEE_TOKEN }}
+        run: node checkin.mjs
