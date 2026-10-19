@@ -825,6 +825,25 @@ def cmd_upload(a):
         sys.stderr.write("未配置 PAT，先 token set\n")
         return 1
     import urllib.parse
+    if getattr(a, "delete", None):
+        removed = []
+        for rel in a.delete:
+            rel = rel.replace("\\", "/").lstrip("/")
+            sha = _content_sha(rel, token)
+            if not sha:
+                removed.append({"file": rel, "ok": False, "state": "仓库中不存在"})
+                continue
+            st, body = _gh_api(
+                "DELETE", "/repos/%s/%s/contents/%s"
+                % (GH_OWNER, GH_REPO, urllib.parse.quote(rel)),
+                {"message": a.message or "chore: remove %s" % rel,
+                 "sha": sha, "branch": GH_BRANCH}, token=token)
+            ok = st in (200, 204)
+            removed.append({"file": rel, "ok": ok,
+                            "state": "deleted" if ok else "HTTP %s %s" % (st, str(body)[:100])})
+        print(json.dumps({"status": "ok" if all(r["ok"] for r in removed) else "partial",
+                          "deleted": removed}, ensure_ascii=False, indent=2))
+        return 0 if all(r["ok"] for r in removed) else 1
     files = []
     skipped_wf = 0
     for full, rel in _iter_project_files():
@@ -941,6 +960,8 @@ def build_parser():
     pu2.add_argument("--dry-run", action="store_true", help="只列出要上传的文件")
     pu2.add_argument("--include-workflows", dest="include_workflows",
                      action="store_true", help="连 .github/workflows 一起传（需 PAT 有 Workflows 权限）")
+    pu2.add_argument("--delete", action="append", metavar="路径",
+                     help="删除仓库中的文件（可重复；只在这一侧删除不影响本地）")
     pu2.set_defaults(fn=cmd_upload)
 
     return p
