@@ -22,10 +22,14 @@
 
 本机 `~/.workbuddy/accounts/`：
 
-| 别名 | 账号 sub | 身份 | 备注 |
+| 别名 | 平台 | 账号 | 备注 |
 | --- | --- | --- | --- |
-| `main` | `3a676ad9` | WorkBuddy 主号 | 客户端当前登录 |
-| `alt1` | `4494bc02` | WorkBuddy 小号 | 早期 `checkin-rt.json` 存档 |
+| `main` | WorkBuddy | `3a676ad9` | 主号，客户端当前登录 |
+| `alt1` | WorkBuddy | `4494bc02` | 小号，早期 `checkin-rt.json` 存档 |
+| `hb1` | HotBee | `152****2587`（id 4620） | 从浏览器 localStorage 导入 |
+| `hb2` | HotBee | `198****2587`（id 4623） | 同上，导入时联网校验过去重 |
+
+WorkBuddy 令牌存 `accounts/checkin-rt.<别名>.json`，HotBee 存 `accounts/hotbee.<别名>.json`。
 
 索引：`~/.workbuddy/checkin-accounts.json`（只存别名/sub/时间，无明文令牌）。
 
@@ -81,14 +85,16 @@ python checkin_accounts.py sync --with-hotbee --expect 2
 > `WB_ACCOUNTS` 一旦存在，`wb_checkin.py` **只读它、忽略 `WB_REFRESH_TOKEN`**，
 > 所以数组必须包含全部账号，不能只放增量。
 
-### 代码同步（可选）
+### 代码同步（走 API，不依赖 git）
+
+本机 git 到 github.com 不通（代理 502），改用 Contents API 直传：
 
 ```bash
-python checkin_accounts.py git-init            # 接管远端历史，不动工作区
-python checkin_accounts.py push "说明"          # commit + push
+python checkin_accounts.py upload --dry-run      # 列出待传文件
+python checkin_accounts.py upload --message "说明"
 ```
 
-凭据写在 `~/.workbuddy/git-credentials`（仅本仓库使用 store helper）。
+默认跳过 `.github/workflows/`（需要 PAT 额外的 Workflows 权限），改闹钟请走网页编辑器。
 
 ## 设计要点
 
