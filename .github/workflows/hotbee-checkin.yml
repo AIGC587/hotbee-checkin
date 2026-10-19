@@ -4,7 +4,7 @@ on:
   schedule:
     # 北京时间 00:05（UTC 前一天 16:05）
     - cron: "5 16 * * *"
-    # 兜底：北京时间 12:00
+    # 兜底：北京时间 12:00，凌晨那次失败或错过时补签
     - cron: "0 4 * * *"
   workflow_dispatch: {}
 
@@ -25,4 +25,5 @@ jobs:
       - name: 执行签到
         env:
           HOTBEE_TOKEN: ${{ secrets.HOTBEE_TOKEN }}
+          HOTBEE_ACCOUNTS: ${{ secrets.HOTBEE_ACCOUNTS }}
         run: node checkin.mjs
