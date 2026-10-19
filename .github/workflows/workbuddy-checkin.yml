@@ -33,5 +33,6 @@ jobs:
       - name: 执行签到
         env:
           WB_REFRESH_TOKEN: ${{ secrets.WB_REFRESH_TOKEN }}
-          WB_RT_FILE: .wb/rt.current
+          WB_ACCOUNTS: ${{ secrets.WB_ACCOUNTS }}
+          WB_RT_DIR: .wb
         run: python wb_checkin.py
