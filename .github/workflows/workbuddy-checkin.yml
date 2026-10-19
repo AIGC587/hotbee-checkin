@@ -1,0 +1,37 @@
+name: WorkBuddy 每日签到
+
+on:
+  schedule:
+    # 北京时间 00:05（UTC 前一天 16:05）
+    - cron: "5 16 * * *"
+    # 兜底 + 领取旅行积分：北京时间 12:10
+    - cron: "10 4 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+jobs:
+  checkin:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: 恢复上次轮换的长效令牌
+        uses: actions/cache@v4
+        with:
+          path: .wb
+          key: wb-rt-${{ github.run_id }}
+          restore-keys: |
+            wb-rt-
+
+      - name: 执行签到
+        env:
+          WB_REFRESH_TOKEN: ${{ secrets.WB_REFRESH_TOKEN }}
+          WB_RT_FILE: .wb/rt.current
+        run: python wb_checkin.py
