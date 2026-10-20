@@ -2,9 +2,14 @@
 *.secret.json
 **/checkin-rt*.json
 .wb/
+.wb_local_test/
 checkin.log
+
+# 运行状态 / 积分记录（HotBee 用 .hb 存上次积分）
+.hb/
 
 # 本地杂项
 __pycache__/
 *.pyc
 .workbuddy/
+_diag/
