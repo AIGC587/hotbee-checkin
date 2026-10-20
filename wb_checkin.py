@@ -111,7 +111,22 @@ def run_one(name, rt, rt_dir):
         code = body.get("code")
         if code == 0:
             credit = body.get("credit") or (body.get("data") or {}).get("credit")
-            print(f"{tag} [OK] 签到成功 +{credit} 积分，连签 {body.get('streak_days', '?')} 天")
+            # 复查一次状态：拿签到后的最新积分和连签天数
+            after, streak = None, body.get("streak_days") or "?"
+            status2, body2 = request(
+                "POST", CHECKIN_BASE + "/v2/billing/meter/checkin-activity-status", headers, {}
+            )
+            if status2 == 200:
+                d2 = body2.get("data") or {}
+                after = next(
+                    (d2.get(k) for k in ("total_credits", "total_credit", "credits", "balance") if d2.get(k) is not None),
+                    None,
+                )
+                streak = d2.get("streak_days") or streak
+            if after is not None and isinstance(after, int) and isinstance(balance, int):
+                print(f"{tag} [OK] 签到成功：积分 {balance} → {after}（本次 +{after - balance}），连签 {streak} 天")
+            else:
+                print(f"{tag} [OK] 签到成功 +{credit} 积分，连签 {streak} 天")
         elif code == 10001 or "已签到" in str(body.get("msg", "")):
             print(f"{tag} [SKIP] 今日已签到")
         else:
