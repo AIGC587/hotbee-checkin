@@ -9,13 +9,19 @@
 """
 import json
 import os
+import random
 import sys
+import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 
 REFRESH_URL = "https://copilot.tencent.com/v2/plugin/auth/token/refresh"
 CHECKIN_BASE = "https://www.codebuddy.cn"
 TRAVEL_BASE = "https://www.workbuddy.cn"
+
+# 北京时间，用于「今日已签」标记的日期
+CST = timezone(timedelta(hours=8))
 
 
 def request(method, url, headers=None, payload=None, timeout=30):
@@ -162,6 +168,20 @@ def run_one(name, rt, rt_dir):
 def main():
     accounts = load_accounts()
     rt_dir = (os.environ.get("WB_RT_DIR") or ".wb").strip()
+
+    # 防重复：今天已有成功签到的记录时，直接结束（不访问平台任何接口）
+    marker = os.path.join(rt_dir, f"done-{datetime.now(CST).strftime('%Y-%m-%d')}")
+    if os.path.exists(marker):
+        print("[SKIP-RUN] 今日已由先前的运行签到成功，本次直接结束（未访问平台）")
+        return 0
+
+    # 防风控：云端运行时在窗口内随机延迟后再签到（本地手动运行不延迟）
+    max_delay = int(os.environ.get("RANDOM_DELAY_MAX_SECONDS") or 0)
+    if max_delay > 0:
+        delay = random.randint(0, max_delay)
+        print(f"[DELAY] 随机延迟 {delay} 秒（约 {delay // 60} 分 {delay % 60} 秒）后开始签到")
+        time.sleep(delay)
+
     results = []
     for name, rt in accounts:
         try:
@@ -169,6 +189,15 @@ def main():
         except Exception as exc:
             print(f"[{name}] [ERROR] 异常：{exc}")
             results.append("fail")
+
+    # 全部账号签到成功（含"已签到"）时写入标记，后续运行直接跳过
+    if results and all(r == "ok" for r in results):
+        try:
+            os.makedirs(rt_dir, exist_ok=True)
+            with open(marker, "w", encoding="utf-8") as fh:
+                fh.write(datetime.now(CST).isoformat())
+        except Exception:
+            pass
 
     if all(r == "auth" for r in results):
         print("[AUTH] 所有账号长效令牌均失效，需要重新导出")
