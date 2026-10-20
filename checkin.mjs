@@ -37,6 +37,27 @@ function savePoints(name, pts) {
   } catch {}
 }
 
+// 「今日已签成功」标记（按北京时间记日期），用于后续运行直接跳过、不访问平台
+function cstToday() {
+  return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
+}
+function doneMarker() {
+  return `${STATE_DIR}/done-${cstToday()}`;
+}
+function alreadySignedToday() {
+  try {
+    return fs.existsSync(doneMarker());
+  } catch {
+    return false;
+  }
+}
+function writeDoneMarker() {
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(doneMarker(), new Date().toISOString());
+  } catch {}
+}
+
 function loadAccounts() {
   const raw = (process.env.HOTBEE_ACCOUNTS || "").trim();
   if (raw) {
@@ -134,6 +155,20 @@ async function runOne({ name, token }) {
 }
 
 (async () => {
+  // 防重复：今天已有成功签到的记录时，直接结束（不访问平台任何接口）
+  if (alreadySignedToday()) {
+    console.log("[SKIP-RUN] 今日已由先前的运行签到成功，本次直接结束（未访问平台）");
+    process.exit(0);
+  }
+
+  // 防风控：云端运行时在窗口内随机延迟后再签到（本地手动运行不延迟）
+  const maxDelay = Number(process.env.RANDOM_DELAY_MAX_SECONDS || 0);
+  if (maxDelay > 0) {
+    const delay = Math.floor(Math.random() * (maxDelay + 1));
+    console.log(`[DELAY] 随机延迟 ${delay} 秒（约 ${Math.floor(delay / 60)} 分 ${delay % 60} 秒）后开始签到`);
+    await new Promise((resolve) => setTimeout(resolve, delay * 1000));
+  }
+
   const accounts = loadAccounts();
   const results = [];
   for (const account of accounts) {
@@ -144,6 +179,7 @@ async function runOne({ name, token }) {
       results.push("fail");
     }
   }
+  if (results.length > 0 && results.every((r) => r === "ok")) writeDoneMarker();
   if (results.every((r) => r === "auth")) {
     console.error("[AUTH] 所有账号登录态失效，请更新 HOTBEE_ACCOUNTS / HOTBEE_TOKEN");
     process.exit(3);
