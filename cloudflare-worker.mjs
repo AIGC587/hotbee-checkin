@@ -1,17 +1,20 @@
 /**
  * Cloudflare Worker —— 签到准点触发器
  *
- * 作用：每天北京时间 00:05（UTC 16:05）准点调用 GitHub API 手动触发
- * AIGC587/hotbee-checkin 仓库里的两个签到工作流，绕过 GitHub 定时任务
- * 的排队延迟（GitHub schedule 经常迟到几十分钟到数小时）。
+ * 作用：每天两个时间点准点调用 GitHub API 手动触发 AIGC587/hotbee-checkin
+ * 仓库里的两个签到工作流，绕过 GitHub 定时任务的排队延迟：
+ *   - UTC 16:05 = 北京 00:05  → 触发后脚本在窗口内随机延迟，实际签到 00:05~00:55 之间
+ *   - UTC 04:10 = 北京 12:10  → 实际签到 12:10~13:00 之间（"12:30 左右"）
+ * 工作流内部带「今日已签成功」标记：当天已签过时，后续运行直接结束、不访问平台。
  *
  * 部署（Dashboard 方式，全程无需安装工具）:
  *   1. Cloudflare Dashboard → Workers & Pages → Create Worker
  *   2. 粘贴本文件全部代码，Deploy
  *   3. Settings → Variables and Secrets → 添加两个 Secret：
  *        GH_PAT       = GitHub 细粒度令牌（需对该仓库有 Actions: Read and write 权限）
- *        TRIGGER_KEY  = 任意一串随机字符（网页手动触发用的口令）
- *   4. Settings → Triggers → Cron Triggers → 添加 "5 16 * * *"（UTC，= 北京 00:05）
+ *        TRIGGER_KEY  = 任意一串随机字符（网页手动触发测试用的口令）
+ *   4. Settings → Triggers → Cron Triggers → 添加两条（均为 UTC）：
+ *        "5 16 * * *"  和  "10 4 * * *"
  *   5. 测试：浏览器访问 https://<worker域名>/?key=<TRIGGER_KEY>
  *      返回两个工作流的触发结果，204=成功；同时到 GitHub Actions 页面
  *      应能看到两条 workflow_dispatch 运行。
@@ -38,7 +41,8 @@ async function dispatchOne(wf, pat) {
         "User-Agent": "checkin-dispatcher",
         "X-GitHub-Api-Version": "2022-11-28",
       },
-      body: JSON.stringify({ ref: REF }),
+      // via_cf=true 让工作流启用「窗口内随机延迟」；手动触发 GitHub 页面时默认不延迟
+      body: JSON.stringify({ ref: REF, inputs: { via_cf: "true" } }),
     }
   );
   // 204 = 触发成功；401/403 = PAT 无效或权限不足；404 = 工作流文件名不对
@@ -55,7 +59,7 @@ async function dispatchAll(env) {
 }
 
 export default {
-  // 定时任务：UTC 16:05 = 北京 00:05
+  // 两个定时点（UTC）：16:05 = 北京 00:05；04:10 = 北京 12:10
   async scheduled(_event, env, ctx) {
     const out = await dispatchAll(env);
     console.log(JSON.stringify(out));
