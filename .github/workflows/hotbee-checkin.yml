@@ -4,8 +4,10 @@ on:
   schedule:
     # 北京时间 00:05（UTC 前一天 16:05）
     - cron: "5 16 * * *"
-    # 兜底：北京时间 12:00，凌晨那次失败或错过时补签
-    - cron: "0 4 * * *"
+    # 兜底：GitHub 定时触发经常推迟数小时，多设几次，脚本幂等（已签会自动跳过）
+    - cron: "30 1 * * *"   # 北京时间 09:30
+    - cron: "0 4 * * *"    # 北京时间 12:00
+    - cron: "30 9 * * *"   # 北京时间 17:30
   workflow_dispatch: {}
 
 permissions:
@@ -22,8 +24,17 @@ jobs:
         with:
           node-version: "22"
 
+      - name: 恢复上次记录的积分
+        uses: actions/cache@v4
+        with:
+          path: .hb
+          key: hb-pts-${{ github.run_id }}
+          restore-keys: |
+            hb-pts-
+
       - name: 执行签到
         env:
           HOTBEE_TOKEN: ${{ secrets.HOTBEE_TOKEN }}
           HOTBEE_ACCOUNTS: ${{ secrets.HOTBEE_ACCOUNTS }}
+          HB_STATE_DIR: .hb
         run: node checkin.mjs
