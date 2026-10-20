@@ -10,7 +10,32 @@
  * 退出码: 0=全部成功或已签到  1=有账号失败  2=缺少配置  3=全部登录态失效
  */
 
+import fs from "node:fs";
+
 const BASE = (process.env.HOTBEE_API_BASE || "https://www.smsz.xyz/prod-api").replace(/\/+$/, "");
+const STATE_DIR = (process.env.HB_STATE_DIR || ".hb").replace(/\/+$/, "");
+
+// 记录每个账号上次的积分，用于输出「积分 X → Y（+N）」
+function stateFile(name) {
+  const safe = String(name).replace(/[^\w.-]+/g, "_");
+  return `${STATE_DIR}/pts.${safe}`;
+}
+function readLastPoints(name) {
+  try {
+    const v = Number(fs.readFileSync(stateFile(name), "utf-8").trim());
+    return Number.isFinite(v) && v > 0 ? v : null;
+  } catch {
+    return null;
+  }
+}
+function savePoints(name, pts) {
+  const v = Number(pts);
+  if (!Number.isFinite(v) || v <= 0) return;
+  try {
+    fs.mkdirSync(STATE_DIR, { recursive: true });
+    fs.writeFileSync(stateFile(name), String(Math.floor(v)));
+  } catch {}
+}
 
 function loadAccounts() {
   const raw = (process.env.HOTBEE_ACCOUNTS || "").trim();
@@ -81,18 +106,27 @@ async function runOne({ name, token }) {
     return "fail";
   }
   if (status.data?.signedIn === true) {
-    console.log(`${tag} [SKIP] 今日已签到`);
+    const last = readLastPoints(name);
+    console.log(`${tag} [SKIP] 今日已签到${last ? `，积分（上次记录）${last}` : ""}`);
     return "ok";
   }
 
+  const before = readLastPoints(name);
   const result = await call(token, "POST", "/charge/signin", {});
   if (isAuthExpired(result)) {
     console.log(`${tag} [AUTH] 登录态失效，需要重新取 token`);
     return "auth";
   }
   if (result.code === 200) {
-    const pts = result.data?.points;
-    console.log(`${tag} [OK] 签到成功${Number.isFinite(Number(pts)) ? `，当前积分 ${pts}` : ""}`);
+    const pts = Number(result.data?.points);
+    savePoints(name, pts);
+    if (Number.isFinite(pts) && before) {
+      console.log(`${tag} [OK] 签到成功：积分 ${before} → ${pts}（本次 +${pts - before}）`);
+    } else if (Number.isFinite(pts)) {
+      console.log(`${tag} [OK] 签到成功，当前积分 ${pts}`);
+    } else {
+      console.log(`${tag} [OK] 签到成功`);
+    }
     return "ok";
   }
   console.log(`${tag} [FAIL] 签到失败: ${result.msg ?? JSON.stringify(result).slice(0, 200)}`);
