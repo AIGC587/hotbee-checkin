@@ -8,7 +8,12 @@ on:
     - cron: "30 1 * * *"   # 北京时间 09:30
     - cron: "0 4 * * *"    # 北京时间 12:00
     - cron: "30 9 * * *"   # 北京时间 17:30
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      via_cf:
+        description: 来自 Cloudflare 准点触发器
+        required: false
+        default: "false"
 
 permissions:
   contents: read
@@ -16,7 +21,7 @@ permissions:
 jobs:
   checkin:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -37,4 +42,7 @@ jobs:
           HOTBEE_TOKEN: ${{ secrets.HOTBEE_TOKEN }}
           HOTBEE_ACCOUNTS: ${{ secrets.HOTBEE_ACCOUNTS }}
           HB_STATE_DIR: .hb
+          # 定时触发或 Cloudflare 准点触发时，在窗口内随机延迟 0~50 分钟（防风控）；
+          # 手动触发不延迟，便于测试
+          RANDOM_DELAY_MAX_SECONDS: ${{ (github.event_name == 'schedule' || github.event.inputs.via_cf == 'true') && '3000' || '0' }}
         run: node checkin.mjs
