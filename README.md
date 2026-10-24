@@ -110,3 +110,29 @@ python checkin_accounts.py upload --message "说明"
 - `schedule` 触发常有 5–15 分钟延迟。
 - Actions 缓存 7 天未访问会被清理，之后回落到 Secret 里的令牌。
 - 本机与云端同时用同一账号的令牌时，以各自最新轮换结果为准；任一端报 auth 失败，重新导出一次即可。
+
+## 故障排查
+
+### 运行失败、退出码 3（全部账号 auth 失败）
+
+日志里出现：
+
+```
+{"code": 12153, "msg": "...invalid_grant: Session doesn't have required client"}
+```
+
+含义：**令牌本身没过期（exp 还在），但它背后的登录会话（Keycloak session / sid）被回收了**。
+客户端重新登录、换设备登录、服务端清理会话都会造成这种情况；这时该账号派生的所有历史令牌同时失效。
+
+修复（本机执行，需客户端处于登录状态）：
+
+```bash
+python checkin_accounts.py add --alias main --from-client --sync
+```
+
+要点：
+
+- 必须用 `--from-client` 重新取令牌，旧令牌救不回来；`--sync` 会写 Secret 并立即触发一次云端运行。
+- 脚本已做兜底：缓存令牌失效时自动回退到 Secret 里的令牌重试，所以刷新档案后**不必手动清 Actions 缓存**。
+- 部分账号失败只发 warning，不再把整次运行标红（只有全部失败才 exit 3）。
+
