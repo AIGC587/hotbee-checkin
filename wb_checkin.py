@@ -70,23 +70,34 @@ def load_accounts():
 def run_one(name, rt, rt_dir):
     tag = f"[{name}]"
     rt_file = os.path.join(rt_dir, f"rt.{name}") if rt_dir else ""
+
+    # 候选顺序：缓存里轮换过的令牌优先，Secret 里的令牌兜底。
+    # 这样档案刷新后即使缓存还是旧令牌，本次运行也能自愈，不必手动清缓存。
+    candidates = [rt]
     if rt_file and os.path.exists(rt_file):
         saved = open(rt_file, encoding="utf-8").read().strip()
-        if saved:
-            rt = saved
+        if saved and saved != rt:
+            candidates = [saved, rt]
 
-    status, body = request(
-        "POST",
-        REFRESH_URL,
-        {
-            "Content-Type": "application/json",
-            "X-Refresh-Token": rt,
-            "X-Auth-Refresh-Source": "plugin",
-            "X-Domain": "copilot.tencent.com",
-        },
-        {},
-    )
-    if status != 200 or body.get("code") != 0:
+    body = {}
+    for idx, cand in enumerate(candidates):
+        status, body = request(
+            "POST",
+            REFRESH_URL,
+            {
+                "Content-Type": "application/json",
+                "X-Refresh-Token": cand,
+                "X-Auth-Refresh-Source": "plugin",
+                "X-Domain": "copilot.tencent.com",
+            },
+            {},
+        )
+        if status == 200 and body.get("code") == 0:
+            rt = cand
+            break
+        if idx + 1 < len(candidates):
+            print(f"{tag} [AUTH] 缓存令牌失效，回退到 Secret 中的令牌重试")
+            continue
         print(f"{tag} [AUTH] 长效令牌刷新失败：" + json.dumps(body, ensure_ascii=False)[:200])
         if "12153" in json.dumps(body) or "invalid_grant" in json.dumps(body):
             print(f"{tag} [AUTH] 令牌背后的登录会话已被回收（客户端重新登录会换 session），"
