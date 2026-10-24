@@ -88,6 +88,9 @@ def run_one(name, rt, rt_dir):
     )
     if status != 200 or body.get("code") != 0:
         print(f"{tag} [AUTH] 长效令牌刷新失败：" + json.dumps(body, ensure_ascii=False)[:200])
+        if "12153" in json.dumps(body) or "invalid_grant" in json.dumps(body):
+            print(f"{tag} [AUTH] 令牌背后的登录会话已被回收（客户端重新登录会换 session），"
+                  f"需本机重新导出：python checkin_accounts.py add --alias {name} --from-client --sync")
         return "auth"
 
     token = body["data"]["accessToken"]
@@ -199,11 +202,24 @@ def main():
         except Exception:
             pass
 
-    if all(r == "auth" for r in results):
-        print("[AUTH] 所有账号长效令牌均失效，需要重新导出")
-        return 3
-    if any(r != "ok" for r in results):
+    ok_names = [n for (n, _), r in zip(accounts, results) if r == "ok"]
+    bad = [(n, r) for (n, _), r in zip(accounts, results) if r != "ok"]
+
+    if not ok_names:
+        if all(r == "auth" for r in results):
+            print("[AUTH] 所有账号长效令牌均失效，需要重新导出")
+            print("::error::所有账号令牌失效，请在本机执行 checkin_accounts.py add --from-client --sync")
+            return 3
+        print("::error::所有账号签到失败")
         return 1
+
+    if bad:
+        # 部分账号失败：主号成功即视为通过，失败账号降级为告警，避免每天红灯淹没真实故障
+        detail = "、".join(f"{n}({r})" for n, r in bad)
+        print(f"[WARN] 部分账号未成功：{detail}")
+        print(f"::warning::部分账号未成功：{detail}")
+    if ok_names:
+        print(f"[DONE] 成功账号：{'、'.join(ok_names)}")
     return 0
 
 
