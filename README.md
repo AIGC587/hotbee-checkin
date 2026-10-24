@@ -13,6 +13,7 @@
 | `checkin_accounts.py` | 本机多账号管理器（唯一定义账号的地方）+ GitHub 同步 |
 | `import_hotbee.py` | 从本机浏览器 localStorage 导入 HotBee 账号（可选） |
 | `wb_checkin.py` | 云端 WorkBuddy 签到（GitHub Actions 运行，标准库，多账号） |
+| `wb_boot_sync.py` | 本机登录守护：会话一变就把新令牌同步到云端，并本机补签（防 12153 复发） |
 | `checkin.mjs` | 云端 HotBee 签到（Node 22，零依赖，多账号） |
 | `cloudflare-worker.mjs` | HotBee 备选方案（Cloudflare Cron） |
 | `.github/workflows/workbuddy-checkin.yml` | WorkBuddy 云端定时任务 |
@@ -84,6 +85,27 @@ python checkin_accounts.py sync --with-hotbee --expect 2
 
 > `WB_ACCOUNTS` 一旦存在，`wb_checkin.py` **只读它、忽略 `WB_REFRESH_TOKEN`**，
 > 所以数组必须包含全部账号，不能只放增量。
+
+### 防复发：本机登录守护（`wb_boot_sync.py`）
+
+**问题**：令牌绑定客户端的登录会话（JWT `sid`）。客户端重新登录 = 换会话，旧会话派生的令牌全废，
+云端报 `12153 invalid_grant` 且无法自救——因为新令牌只存在于本机。
+
+**做法**：登录后常驻一个无窗口进程，每 5 分钟比对「客户端 sid vs 档案 sid」：
+sid 变了 → 用客户端最新令牌刷新档案 + 写回 Secret；当天没本机补签过 → 顺手补一次（幂等）。
+
+已注册到 `HKCU\Software\Microsoft\Windows\CurrentVersion\Run`（名称 `WorkBuddyTokenSync`）：
+
+```
+pythonw.exe "E:\WorkBuddy\自动签到\wb_boot_sync.py" --watch-minutes 0 --interval 300 --wait 900
+```
+
+- 日志：`_logs/boot-sync-YYYY-MM-DD.log`；状态：`_logs/boot-sync-state.json`
+- 手动体检：`python wb_boot_sync.py --dry-run --once`
+- 取消自启：`reg delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v WorkBuddyTokenSync /f`
+
+> 注意：**单独给 WorkBuddy 开「开机启动」并不能防复发**，也不影响本守护——
+> 客户端什么时候起来都能被下一次轮询抓到；真正兜住的是「会话变了就同步令牌」这一步。
 
 ### 代码同步（走 API，不依赖 git）
 
