@@ -226,6 +226,18 @@ def hotbee_selfheal():
             % ",".join(body["missing_local"]))
 
 
+def alias_for_sub(sub):
+    """按账号 sub 找到已有别名；找不到就返回 None（避免把不同号都塞进 main）。"""
+    try:
+        import checkin_accounts as ca
+        for alias, m in (ca.load_index().get("accounts") or {}).items():
+            if str(m.get("sub") or "") == str(sub or ""):
+                return alias
+    except Exception:
+        pass
+    return None
+
+
 def tick(alias, dispatch, dry_run, hotbee=True):
     try:
         tok = client_token()
@@ -247,12 +259,15 @@ def tick(alias, dispatch, dry_run, hotbee=True):
         return info
 
     if changed:
-        log("检测到会话变化：档案 sid=%s → 客户端 sid=%s"
-            % ((baseline or "?")[:8], sid[:8]))
-        rc, out = cli(["add", "--alias", alias, "--from-client"])
+        sub = str(claims(tok).get("sub") or "")
+        target = alias_for_sub(sub) or alias
+        log("检测到会话变化：档案 sid=%s → 客户端 sid=%s（归入 %s）"
+            % ((baseline or "?")[:8], sid[:8], target))
+        rc, out = cli(["add", "--alias", target, "--from-client"])
         if rc != 0:
             log("刷新档案失败：%s" % out.strip().replace("\n", " ")[:240])
             return info
+        alias = target
         log("档案已换成客户端当前会话的令牌")
 
     if not done_today and (time.time() - float(st.get("last_try") or 0) >= RETRY_GAP):
