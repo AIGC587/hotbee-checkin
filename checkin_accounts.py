@@ -780,9 +780,10 @@ def cmd_peek(a):
         "昵称": cl.get("nickname") or "",
         "手机": (phone[:3] + "****" + phone[-4:]) if len(phone) >= 8 else phone,
         "账号": str(_sub_of(rt))[:8],
-        "积分": bal,
+        "签到积分": bal,
         "连签天数": d.get("streak_days"),
         "今日已签": d.get("today_checked_in"),
+        "说明": "签到积分是签到体系口径；客户端弹窗的「积分余额」是另一套计费口径，二者不同",
     }, ensure_ascii=False, indent=2))
     return 0
 
