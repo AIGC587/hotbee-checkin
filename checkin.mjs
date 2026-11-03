@@ -37,24 +37,41 @@ function savePoints(name, pts) {
   } catch {}
 }
 
-// 「今日已签成功」标记（按北京时间记日期），用于后续运行直接跳过、不访问平台
+// 「今日已签成功」标记：按账号分别记录（北京时间日期），用于后续运行跳过该账号、不访问平台
 function cstToday() {
   return new Date(Date.now() + 8 * 3600 * 1000).toISOString().slice(0, 10);
 }
-function doneMarker() {
-  return `${STATE_DIR}/done-${cstToday()}`;
+function safeName(name) {
+  return String(name).replace(/[^\w.-]+/g, "_");
 }
-function alreadySignedToday() {
+function doneMarker(name) {
+  return `${STATE_DIR}/done-${cstToday()}-${safeName(name)}`;
+}
+function alreadySignedToday(name) {
   try {
-    return fs.existsSync(doneMarker());
+    return fs.existsSync(doneMarker(name));
   } catch {
     return false;
   }
 }
-function writeDoneMarker() {
+function writeDoneMarker(name) {
   try {
     fs.mkdirSync(STATE_DIR, { recursive: true });
-    fs.writeFileSync(doneMarker(), new Date().toISOString());
+    fs.writeFileSync(doneMarker(name), new Date().toISOString());
+  } catch {}
+}
+// 清理 7 天前的标记文件，避免缓存无限增长
+function pruneMarkers() {
+  try {
+    const keep = new Set([0, 1, 2, 3, 4, 5, 6].map((d) => {
+      const t = new Date(Date.now() + 8 * 3600 * 1000 - d * 86400000);
+      return `done-${t.toISOString().slice(0, 10)}-`;
+    }));
+    for (const f of fs.readdirSync(STATE_DIR)) {
+      if (f.startsWith("done-") && ![...keep].some((k) => f.startsWith(k))) {
+        fs.rmSync(`${STATE_DIR}/${f}`, { force: true });
+      }
+    }
   } catch {}
 }
 
@@ -117,6 +134,12 @@ const isAuthExpired = (r) => {
 async function runOne({ name, token }) {
   const tag = `[${name}]`;
 
+  // 该账号今天已签成功 → 本地跳过，不访问平台
+  if (alreadySignedToday(name)) {
+    console.log(`${tag} [SKIP-LOCAL] 今日已签到成功（本地标记），未访问平台`);
+    return "ok";
+  }
+
   const status = await call(token, "GET", "/charge/signinStatus");
   if (isAuthExpired(status)) {
     console.log(`${tag} [AUTH] 登录态失效，需要重新取 token`);
@@ -129,6 +152,7 @@ async function runOne({ name, token }) {
   if (status.data?.signedIn === true) {
     const last = readLastPoints(name);
     console.log(`${tag} [SKIP] 今日已签到${last ? `，积分（上次记录）${last}` : ""}`);
+    writeDoneMarker(name);
     return "ok";
   }
 
@@ -148,6 +172,7 @@ async function runOne({ name, token }) {
     } else {
       console.log(`${tag} [OK] 签到成功`);
     }
+    writeDoneMarker(name);
     return "ok";
   }
   console.log(`${tag} [FAIL] 签到失败: ${result.msg ?? JSON.stringify(result).slice(0, 200)}`);
@@ -155,11 +180,7 @@ async function runOne({ name, token }) {
 }
 
 (async () => {
-  // 防重复：今天已有成功签到的记录时，直接结束（不访问平台任何接口）
-  if (alreadySignedToday()) {
-    console.log("[SKIP-RUN] 今日已由先前的运行签到成功，本次直接结束（未访问平台）");
-    process.exit(0);
-  }
+  pruneMarkers();
 
   // 防风控：云端运行时在窗口内随机延迟后再签到（本地手动运行不延迟）
   const maxDelay = Number(process.env.RANDOM_DELAY_MAX_SECONDS || 0);
@@ -179,7 +200,6 @@ async function runOne({ name, token }) {
       results.push("fail");
     }
   }
-  if (results.length > 0 && results.every((r) => r === "ok")) writeDoneMarker();
   if (results.every((r) => r === "auth")) {
     console.error("[AUTH] 所有账号登录态失效，请更新 HOTBEE_ACCOUNTS / HOTBEE_TOKEN");
     process.exit(3);
