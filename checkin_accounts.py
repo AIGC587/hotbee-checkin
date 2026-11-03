@@ -906,7 +906,8 @@ def _git(args, check=True):
 
 
 UPLOAD_SKIP_DIRS = {".git", "__pycache__", ".workbuddy", "node_modules",
-                    ".venv", ".idea", ".vscode", ".hb", ".wb", ".wb_local_test", "_diag"}
+                    ".venv", ".idea", ".vscode", ".hb", ".wb", ".wb_local_test", "_diag",
+                    ".wrangler", "_logs"}
 UPLOAD_SKIP_EXT = (".pyc", ".secret.json", ".log", ".tmp")
 
 
