@@ -158,25 +158,34 @@ python checkin_accounts.py sync
 
 ### 3.3 HotBee 登录态过期
 
-**症状**：云端日志出现 `[AUTH] 登录态失效`。
+**症状**：云端日志出现 `[AUTH] 登录态失效`；本机 `check` 该号返回「用户未登录」。
 
-**原因**：HotBee 没有自动续期机制，token 失效后必须人工重新获取。
+**原因**：HotBee 没有刷新接口，token 由浏览器会话维持（约两周量级）。浏览器仍在登录时，令牌会自动更新；云端拿的是旧副本，过期即失效。
 
-**处理**：
-
-1. 在 WorkBuddy 内置浏览器打开 `https://hotbee.cn`，登录该账号
-2. 执行导入（会联网校验 token 有效性并按账号去重）：
+**处理（一条命令，推荐）**：
 
 ```bash
-python import_hotbee.py --dry-run   # 先确认能读到几个号
-python import_hotbee.py             # 正式写入本地
+python checkin_accounts.py hotbee-fix            # 抓令牌 → 校验 → 写入云端 → 触发签到
+python checkin_accounts.py hotbee-fix --dry-run  # 只看浏览器里有哪些可用号
 ```
 
-3. 同步到云端（`--expect` 必须等于实际账号数，否则会中止，避免覆盖丢失）：
+- 浏览器仍登录的账号会被自动修复，输出里 `sync.ok=true` 即成功，`run.conclusion=success` 表示云端已跑完。
+- 输出含 `missing_local` 时，说明这些号连浏览器登录态也丢了 → 按下面第 1 步登录后重跑同一条命令即可。
+- 想少一步：`--no-run` 只写云端不触发运行。
+
+**自动自愈（已内置）**：开机守护 `wb_boot_sync.py` 现在每轮都会校验 HotBee 令牌，发现失效就自动执行上面这套流程（失败间隔 6 小时，不会刷屏）。前提是浏览器里还留着登录态；浏览器也掉线时才需要人工登录一次。
+
+**手动兜底（老流程，仍可用）**：
 
 ```bash
-python checkin_accounts.py sync --with-hotbee --expect 2 --run
+python import_hotbee.py --dry-run   # 先确认真能读到号
+python import_hotbee.py             # 写入本地
+python checkin_accounts.py sync --with-hotbee --expect N --run   # N=本地实际账号数
 ```
+
+> `--expect` 是防呆：数量不符会中止，避免把云端账号挤掉。用 `hotbee-fix` 可跳过这个参数。
+
+**跨设备提醒**：令牌只在浏览器所在机器上更新。长期不开机时云端会持续失败（GitHub 会发失败邮件），回来后跑一次 `hotbee-fix` 即可。
 
 ### 3.4 GitHub 定时任务被停用
 
