@@ -18,8 +18,11 @@ echo.
 echo 确认无误按任意键继续导出，否则按 Ctrl+C 取消...
 pause >nul
 echo.
-echo [2] 开始导出并同步云端...
-"%PYEXE%" checkin_accounts.py add --alias alt1 --from-client --sync --run --wait 120
+echo [2] 导出到档案 alt1 并写入云端...
+"%PYEXE%" checkin_accounts.py add --alias alt1 --from-client --sync
 echo.
-echo 完成。run.conclusion 为 success 即成功。
+echo [3] 触发一次云端签到...
+"%PYEXE%" checkin_accounts.py sync --run --wait 120
+echo.
+echo 完成。上面若出现 run.conclusion 为 success 即成功。
 pause
