@@ -731,6 +731,62 @@ def cmd_token(a):
     return 0 if ok else 1
 
 
+def cmd_peek(a):
+    """只读探测：显示客户端当前登录账号的 sub 与积分（切号后确认身份用，不签到）。"""
+    import base64
+    import wb_checkin as wb
+
+    def _sub_of(token):
+        try:
+            seg = token.split(".")[1]
+            seg += "=" * (-len(seg) % 4)
+            return json.loads(base64.urlsafe_b64decode(seg)).get("sub") or ""
+        except Exception:
+            return ""
+
+    try:
+        rt, _src = rt_auth._load_local_rt()
+    except Exception as exc:
+        print(json.dumps({"status": "error", "msg": "读取客户端登录态失败：%s" % str(exc)[:200]},
+                         ensure_ascii=False, indent=2))
+        return 1
+    st, body = wb.request("POST", wb.REFRESH_URL, {
+        "Content-Type": "application/json",
+        "X-Refresh-Token": rt,
+        "X-Auth-Refresh-Source": "plugin",
+        "X-Domain": "copilot.tencent.com",
+    }, {})
+    if st != 200 or body.get("code") != 0:
+        print(json.dumps({"status": "auth-failed", "detail": str(body)[:200]}, ensure_ascii=False))
+        return 1
+    tok = body["data"]["accessToken"]
+
+    def _claims(t):
+        try:
+            seg = t.split(".")[1]
+            seg += "=" * (-len(seg) % 4)
+            return json.loads(base64.urlsafe_b64decode(seg))
+        except Exception:
+            return {}
+
+    cl = _claims(tok)
+    st2, body2 = wb.request("POST", wb.CHECKIN_BASE + "/v2/billing/meter/checkin-activity-status",
+                            {"Authorization": "Bearer " + tok, "Content-Type": "application/json"}, {})
+    d = (body2.get("data") or {}) if st2 == 200 else {}
+    bal = next((d.get(k) for k in ("total_credits", "total_credit", "credits", "balance")
+                if d.get(k) is not None), None)
+    phone = str(cl.get("preferred_username") or "")
+    print(json.dumps({
+        "昵称": cl.get("nickname") or "",
+        "手机": (phone[:3] + "****" + phone[-4:]) if len(phone) >= 8 else phone,
+        "账号": str(_sub_of(rt))[:8],
+        "积分": bal,
+        "连签天数": d.get("streak_days"),
+        "今日已签": d.get("today_checked_in"),
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
 def cmd_hotbee_fix(a):
     """一条命令自愈：从浏览器抓最新 HotBee 令牌 → 校验 → 入库 → 写云端 → 触发签到。
 
@@ -1074,6 +1130,9 @@ def build_parser():
     pf.add_argument("--no-run", dest="no_run", action="store_true", help="只写云端，不触发运行")
     pf.add_argument("--wait", type=int, default=120, help="等待运行结果秒数，默认 120")
     pf.set_defaults(fn=cmd_hotbee_fix)
+
+    pp = sp.add_parser("peek", help="只读查看客户端当前登录账号的 sub 与积分（切号后确认身份）")
+    pp.set_defaults(fn=cmd_peek)
 
     pu2 = sp.add_parser("upload", help="把项目文件同步到 GitHub 仓库（走 API，不依赖 git）")
     pu2.add_argument("--message", help="提交说明")
