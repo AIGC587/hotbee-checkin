@@ -731,6 +731,119 @@ def cmd_token(a):
     return 0 if ok else 1
 
 
+def cmd_hotbee_fix(a):
+    """一条命令自愈：从浏览器抓最新 HotBee 令牌 → 校验 → 入库 → 写云端 → 触发签到。
+
+    典型用法（令牌过期报 [AUTH] 时）：
+        python checkin_accounts.py hotbee-fix
+    浏览器里已登录的账号会被自动修复；登录态也丢了的账号会列出来提示重新登录。
+    """
+    import import_hotbee as ih
+
+    token = _read_gh_token()
+    report = {"status": "ok", "scanned": 0, "valid": [], "dead": [],
+              "missing_local": [], "sync": None, "errors": []}
+
+    hits = {}
+    for d in ih.CANDIDATE_DIRS:
+        for hit in ih.scan_dir(d):
+            hits.setdefault(hit["token"], hit)
+    report["scanned"] = len(hits)
+
+    by_id = {}
+    for tok, hit in hits.items():
+        ok, msg = ih._validate(tok)
+        hit["valid"], hit["why"] = ok, msg
+        key = hit.get("id") or tok
+        if key not in by_id or (ok and not by_id[key]["valid"]):
+            by_id[key] = hit
+
+    valid = [h for h in by_id.values() if h["valid"]]
+    dead = [h for h in by_id.values() if not h["valid"]]
+    for h in valid:
+        report["valid"].append({"id": h.get("id"), "phone": (h.get("phone") or "")[-4:]})
+    for h in dead:
+        report["dead"].append({"id": h.get("id"), "why": h.get("why")})
+
+    if not valid:
+        report["status"] = "need-login"
+        report["errors"].append(
+            "浏览器里没有可用的 HotBee 登录态。请先在浏览器登录 hotbee.cn，再跑本命令。")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 2
+
+    if a.dry_run:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 0
+
+    # 入库：按 id 复用已有别名，新号补 hbN；同时清掉本地已失效、浏览器里也没有的账号
+    idx = load_index()
+    hb = idx.setdefault("hotbee", {})
+    by_id_local = {str(m.get("account_id")): alias for alias, m in hb.items() if m.get("account_id")}
+    used = set()
+    for h in valid:
+        acc = str(h.get("id") or "")
+        alias = by_id_local.get(acc)
+        if not alias:
+            n = 1
+            while ("hb%d" % n) in hb or ("hb%d" % n) in used:
+                n += 1
+            alias = "hb%d" % n
+        used.add(alias)
+        upsert_hotbee(alias, h["token"], h.get("phone"), h.get("id"))
+        log_msg = "%s(%s) 已更新" % (alias, (h.get("phone") or "")[-4:])
+        report.setdefault("updated", []).append(log_msg)
+
+    idx = load_index()
+    hb = idx.get("hotbee", {})
+    valid_ids = {str(h.get("id") or "") for h in valid}
+    for alias in list(hb.keys()):
+        if alias in used:
+            continue
+        acc = str((hb.get(alias) or {}).get("account_id") or "")
+        if acc and acc in valid_ids:
+            continue
+        report["missing_local"].append(alias)
+        hb.pop(alias, None)
+    save_index(idx)
+
+    # 写云端 + 触发运行
+    items, missing = build_accounts_json("hotbee")
+    if not items:
+        report["status"] = "error"
+        report["errors"].append("本地没有可用 HotBee 账号，未写入云端")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1
+    if not token:
+        report["status"] = "error"
+        report["errors"].append("未配置 GitHub PAT（先 token set），本地已修好但云端未更新")
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1
+
+    payload = json.dumps(items, ensure_ascii=False, separators=(",", ":"))
+    ok, msg = _put_secret("HOTBEE_ACCOUNTS", payload, token)
+    report["sync"] = {"ok": ok, "msg": msg, "accounts": [i["name"] for i in items],
+                      "chars": len(payload), "missing": missing}
+    if not ok:
+        report["status"] = "error"
+        report["errors"].append("写入 HOTBEE_ACCOUNTS 失败：%s" % msg)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+        return 1
+
+    if not a.no_run:
+        ok2, msg2 = _dispatch(WORKFLOW_HB, token)
+        report["trigger"] = {"ok": ok2, "msg": msg2}
+        if ok2:
+            report["run"] = _wait_run(WORKFLOW_HB, token, wait_s=a.wait)
+
+    if report["missing_local"]:
+        report["status"] = "partial"
+        report["note"] = "以下账号浏览器登录态已丢失，需重新登录后重跑本命令：%s" \
+                         % ", ".join(report["missing_local"])
+    print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0 if report["status"] in ("ok", "partial") else 1
+
+
 def cmd_sync(a):
     token = _read_gh_token()
     if not token:
@@ -954,6 +1067,12 @@ def build_parser():
     ps.add_argument("--expect", type=int,
                     help="配合 --with-hotbee，声明本地 HotBee 账号数，防止误覆盖")
     ps.set_defaults(fn=cmd_sync)
+
+    pf = sp.add_parser("hotbee-fix", help="HotBee 令牌失效后一条命令自愈（抓令牌→校验→写云端→触发签到）")
+    pf.add_argument("--dry-run", action="store_true", help="只看浏览器里能读到哪些有效账号，不改任何东西")
+    pf.add_argument("--no-run", dest="no_run", action="store_true", help="只写云端，不触发运行")
+    pf.add_argument("--wait", type=int, default=120, help="等待运行结果秒数，默认 120")
+    pf.set_defaults(fn=cmd_hotbee_fix)
 
     pu2 = sp.add_parser("upload", help="把项目文件同步到 GitHub 仓库（走 API，不依赖 git）")
     pu2.add_argument("--message", help="提交说明")
