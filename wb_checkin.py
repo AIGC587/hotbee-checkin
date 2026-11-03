@@ -67,11 +67,22 @@ def load_accounts():
     return [("默认账号", single)]
 
 
-def marker_path(rt_dir, name):
-    """按账号记「今日已签成功」，避免一个号签完后把新增号一起挡掉。"""
+def sub_of_rt(rt):
+    """从长效令牌里解出账号 sub（别名可能改指向别的号，标记要跟账号走）。"""
+    try:
+        import base64
+        seg = rt.split(".")[1]
+        seg += "=" * (-len(seg) % 4)
+        return (json.loads(base64.urlsafe_b64decode(seg)).get("sub") or "")[:8]
+    except Exception:
+        return ""
+
+
+def marker_path(rt_dir, name, key=""):
+    """按账号记「今日已签成功」；key 优先用账号 sub，退化时用别名。"""
     day = datetime.now(CST).strftime("%Y-%m-%d")
-    safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(name))
-    return os.path.join(rt_dir, f"done-{day}.{safe}")
+    ident = key or "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(name))
+    return os.path.join(rt_dir, f"done-{day}.{ident}")
 
 
 def prune_markers(rt_dir):
@@ -98,9 +109,10 @@ def prune_markers(rt_dir):
 def run_one(name, rt, rt_dir):
     tag = f"[{name}]"
     rt_file = os.path.join(rt_dir, f"rt.{name}") if rt_dir else ""
+    ident = sub_of_rt(rt) or name   # 标记跟账号走，不跟别名走
 
     # 该账号今天已签成功 → 本地跳过，不访问平台
-    if rt_dir and os.path.exists(marker_path(rt_dir, name)):
+    if rt_dir and os.path.exists(marker_path(rt_dir, name, ident)):
         print(f"{tag} [SKIP-LOCAL] 今日已签到成功（本地标记），未访问平台")
         return "ok"
 
@@ -190,7 +202,7 @@ def run_one(name, rt, rt_dir):
     if result == "ok" and rt_dir:
         try:
             os.makedirs(rt_dir, exist_ok=True)
-            with open(marker_path(rt_dir, name), "w", encoding="utf-8") as fh:
+            with open(marker_path(rt_dir, name, sub_of_rt(rt) or name), "w", encoding="utf-8") as fh:
                 fh.write(datetime.now(CST).isoformat())
         except Exception:
             pass
