@@ -25,6 +25,7 @@ import base64
 import datetime
 import json
 import os
+import socket
 import subprocess
 import sys
 import time
@@ -39,7 +40,24 @@ SKILL_SCRIPTS = os.path.join(os.path.expanduser("~"), ".workbuddy", "skills",
                             "totorosir-workbuddy-checkin", "scripts")
 
 RETRY_GAP = 1800  # 签到失败后至少隔 30 分钟再试，避免空转
+HOTBEE_RETRY_GAP = 6 * 3600  # HotBee 自愈失败后至少隔 6 小时再试，避免刷屏
+LOCK_PORT = 51787  # 单实例锁：端口占用说明已有一个守护在跑
 _log_path = None
+_lock_sock = None
+
+
+def acquire_lock():
+    """用本地端口当互斥锁，避免重复登录/重复启动时跑出多个守护。"""
+    global _lock_sock
+    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        s.bind(("127.0.0.1", LOCK_PORT))
+        s.listen(1)
+        _lock_sock = s
+        return True
+    except OSError:
+        s.close()
+        return False
 
 
 def log(msg):
@@ -143,7 +161,53 @@ def do_sync(dispatch):
     return bool(sec.get("ok"))
 
 
-def tick(alias, dispatch, dry_run):
+def hotbee_tokens_ok():
+    """检查本机 HotBee 令牌是否还有效。返回 (是否全部有效, 明细)。"""
+    try:
+        import checkin_accounts as ca
+        import import_hotbee as ih
+    except Exception as exc:
+        return True, "模块不可用（%s）" % str(exc)[:60]
+    hb = (ca.load_index().get("hotbee") or {})
+    if not hb:
+        return True, "本机无 HotBee 账号"
+    bad = []
+    for alias in hb:
+        tok = ca.read_hotbee_token(alias)
+        if not tok:
+            bad.append("%s 缺令牌" % alias)
+            continue
+        ok, msg = ih._validate(tok)
+        if not ok:
+            bad.append("%s %s" % (alias, str(msg)[:16]))
+    return (not bad), ("; ".join(bad) if bad else "全部有效")
+
+
+def hotbee_selfheal():
+    """令牌失效时尝试从浏览器抓新令牌并同步云端，一条命令搞定。"""
+    ok, detail = hotbee_tokens_ok()
+    if ok:
+        return
+    st = load_state()
+    if time.time() - float(st.get("hotbee_fix_at") or 0) < HOTBEE_RETRY_GAP:
+        log("HotBee 令牌异常（%s），距上次自愈不足 6 小时，跳过" % detail)
+        return
+    st["hotbee_fix_at"] = time.time()
+    save_state(st)
+    log("HotBee 令牌异常：%s → 开始自愈（从浏览器重新抓取）" % detail)
+    rc, out = cli(["hotbee-fix", "--wait", "90"], timeout=420)
+    body = parse_json(out) or {}
+    status = body.get("status") or "?"
+    sync = body.get("sync") or {}
+    log("HotBee 自愈结果：status=%s 云端=%s%s"
+        % (status, "成功" if sync.get("ok") else "未写入",
+           (" 账号 " + ",".join(sync.get("accounts") or [])) if sync.get("accounts") else ""))
+    if body.get("missing_local"):
+        log("需要人工登录的账号：%s（浏览器登录 hotbee.cn 后会自动重试）"
+            % ",".join(body["missing_local"]))
+
+
+def tick(alias, dispatch, dry_run, hotbee=True):
     try:
         tok = client_token()
     except Exception as exc:
@@ -188,6 +252,12 @@ def tick(alias, dispatch, dry_run):
             log("同步失败，下一轮重试")
 
     info["done_today"] = done_today
+
+    if hotbee:
+        try:
+            hotbee_selfheal()
+        except Exception as exc:
+            log("HotBee 自愈异常：%s" % str(exc)[:120])
     return info
 
 
@@ -200,19 +270,26 @@ def main():
     ap.add_argument("--watch-minutes", type=int, default=720,
                     help="守护时长（分钟），0 表示常驻直到注销")
     ap.add_argument("--dispatch", action="store_true", help="同步后触发一次云端运行")
+    ap.add_argument("--no-hotbee", dest="no_hotbee", action="store_true",
+                    help="不做 HotBee 令牌自愈检查")
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--once", action="store_true", help="只跑一轮")
     a = ap.parse_args()
 
     os.makedirs(LOG_DIR, exist_ok=True)
     _log_path = os.path.join(LOG_DIR, "boot-sync-%s.log" % datetime.date.today().isoformat())
+
+    if not a.dry_run and not a.once and not acquire_lock():
+        log("已有守护在运行（端口 %d 被占用），本次退出" % LOCK_PORT)
+        return 0
+
     log("=== 启动 pid=%d 守护=%s分钟 间隔=%ds ===" % (os.getpid(), a.watch_minutes, a.interval))
 
     end = (time.time() + a.watch_minutes * 60) if a.watch_minutes > 0 else float("inf")
     waited = 0
     first = True
     while True:
-        info = tick(a.alias, a.dispatch, a.dry_run)
+        info = tick(a.alias, a.dispatch, a.dry_run, hotbee=not a.no_hotbee)
         if info.get("skip"):
             if first or waited % 600 == 0:
                 log(info["skip"])
