@@ -67,9 +67,42 @@ def load_accounts():
     return [("默认账号", single)]
 
 
+def marker_path(rt_dir, name):
+    """按账号记「今日已签成功」，避免一个号签完后把新增号一起挡掉。"""
+    day = datetime.now(CST).strftime("%Y-%m-%d")
+    safe = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in str(name))
+    return os.path.join(rt_dir, f"done-{day}.{safe}")
+
+
+def prune_markers(rt_dir):
+    """只保留最近 7 天的标记文件。"""
+    try:
+        keep = {(datetime.now(CST) - timedelta(days=d)).strftime("%Y-%m-%d")
+                for d in range(7)}
+        for fn in os.listdir(rt_dir):
+            if not fn.startswith("done-"):
+                continue
+            day = fn[5:15]
+            if day in keep:
+                continue
+            if len(fn) == 15:
+                continue  # 老版本全局标记（done-YYYY-MM-DD），留着无害
+            try:
+                os.remove(os.path.join(rt_dir, fn))
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def run_one(name, rt, rt_dir):
     tag = f"[{name}]"
     rt_file = os.path.join(rt_dir, f"rt.{name}") if rt_dir else ""
+
+    # 该账号今天已签成功 → 本地跳过，不访问平台
+    if rt_dir and os.path.exists(marker_path(rt_dir, name)):
+        print(f"{tag} [SKIP-LOCAL] 今日已签到成功（本地标记），未访问平台")
+        return "ok"
 
     # 候选顺序：缓存里轮换过的令牌优先，Secret 里的令牌兜底。
     # 这样档案刷新后即使缓存还是旧令牌，本次运行也能自愈，不必手动清缓存。
@@ -153,6 +186,15 @@ def run_one(name, rt, rt_dir):
             print(f"{tag} [FAIL] 签到失败：" + json.dumps(body, ensure_ascii=False)[:200])
             result = "fail"
 
+    # 该账号今天签成功（含"已签到"）→ 记标记，后续运行本地跳过
+    if result == "ok" and rt_dir:
+        try:
+            os.makedirs(rt_dir, exist_ok=True)
+            with open(marker_path(rt_dir, name), "w", encoding="utf-8") as fh:
+                fh.write(datetime.now(CST).isoformat())
+        except Exception:
+            pass
+
     try:
         status, body = request("GET", TRAVEL_BASE + "/activity/growth/buddy/travel/status", headers)
         tdata = body.get("data") or {}
@@ -182,12 +224,7 @@ def run_one(name, rt, rt_dir):
 def main():
     accounts = load_accounts()
     rt_dir = (os.environ.get("WB_RT_DIR") or ".wb").strip()
-
-    # 防重复：今天已有成功签到的记录时，直接结束（不访问平台任何接口）
-    marker = os.path.join(rt_dir, f"done-{datetime.now(CST).strftime('%Y-%m-%d')}")
-    if os.path.exists(marker):
-        print("[SKIP-RUN] 今日已由先前的运行签到成功，本次直接结束（未访问平台）")
-        return 0
+    prune_markers(rt_dir)
 
     # 防风控：云端运行时在窗口内随机延迟后再签到（本地手动运行不延迟）
     max_delay = int(os.environ.get("RANDOM_DELAY_MAX_SECONDS") or 0)
@@ -203,15 +240,6 @@ def main():
         except Exception as exc:
             print(f"[{name}] [ERROR] 异常：{exc}")
             results.append("fail")
-
-    # 全部账号签到成功（含"已签到"）时写入标记，后续运行直接跳过
-    if results and all(r == "ok" for r in results):
-        try:
-            os.makedirs(rt_dir, exist_ok=True)
-            with open(marker, "w", encoding="utf-8") as fh:
-                fh.write(datetime.now(CST).isoformat())
-        except Exception:
-            pass
 
     ok_names = [n for (n, _), r in zip(accounts, results) if r == "ok"]
     bad = [(n, r) for (n, _), r in zip(accounts, results) if r != "ok"]
