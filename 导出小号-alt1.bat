@@ -1,20 +1,25 @@
 @echo off
 setlocal
-title 导出 WorkBuddy 小号 到云端
+title 导出 小号（alt1）
 cd /d "%~dp0"
 set "PYEXE=C:\Users\aisys\.workbuddy\binaries\python\versions\3.13.12\python.exe"
 if not exist "%PYEXE%" set "PYEXE=python"
 echo.
 echo ============================================
-echo   导出「小号」到云端档案 alt1
-echo   前提：WorkBuddy 客户端当前登录的就是这个号
+echo   即将把「客户端当前登录的账号」导出为 小号（alt1）
 echo ============================================
 echo.
-"%PYEXE%" checkin_accounts.py whoami
+echo [1] 当前客户端登录的是：
+"%PYEXE%" checkin_accounts.py peek
 echo.
-echo 上面显示的就是要导出的账号，确认无误后继续（按任意键）...
+echo 请确认上面的昵称/手机号就是 小号。
+echo 如果不对，直接关掉本窗口，先切换账号。
+echo.
+echo 确认无误按任意键继续导出，否则按 Ctrl+C 取消...
 pause >nul
+echo.
+echo [2] 开始导出并同步云端...
 "%PYEXE%" checkin_accounts.py add --alias alt1 --from-client --sync --run --wait 120
 echo.
-echo 导出结束。若结果里 run.conclusion 为 success 即成功。
+echo 完成。run.conclusion 为 success 即成功。
 pause
