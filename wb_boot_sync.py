@@ -183,10 +183,29 @@ def hotbee_tokens_ok():
     return (not bad), ("; ".join(bad) if bad else "全部有效")
 
 
+def hotbee_age_days():
+    """各 HotBee 账号令牌已存放多少天（用于临期提醒，实测寿命约 14 天）。"""
+    try:
+        import checkin_accounts as ca
+        out = []
+        for alias, m in (ca.load_index().get("hotbee") or {}).items():
+            sa = float(m.get("saved_at") or 0)
+            if sa:
+                out.append((alias, (time.time() - sa) / 86400.0))
+        return out
+    except Exception:
+        return []
+
+
 def hotbee_selfheal():
     """令牌失效时尝试从浏览器抓新令牌并同步云端，一条命令搞定。"""
     ok, detail = hotbee_tokens_ok()
     if ok:
+        ages = hotbee_age_days()
+        old = [(a, d) for a, d in ages if d >= 12]
+        if old:
+            log("HotBee 令牌临期：%s（寿命约 14 天）。请打开 hotbee.cn 让浏览器续期，"
+                "或重新登录后跑 hotbee-fix" % "、".join("%s %.0f天" % (a, d) for a, d in old))
         return
     st = load_state()
     if time.time() - float(st.get("hotbee_fix_at") or 0) < HOTBEE_RETRY_GAP:
