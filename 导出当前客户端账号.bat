@@ -1,24 +1,20 @@
 @echo off
-chcp 65001 >nul
-title å¯¼å‡ºå½“å‰å®¢æˆ·ç«¯ç™»å½•çš„ WorkBuddy è´¦å·
+setlocal
+title µ¼³öµ±Ç°¿Í»§¶ËµÇÂ¼µÄ WorkBuddy ÕËºÅ
 cd /d "%~dp0"
-
 set "PYEXE=C:\Users\aisys\.workbuddy\binaries\python\versions\3.13.12\python.exe"
 if not exist "%PYEXE%" set "PYEXE=python"
-
-echo ============================================
-echo  æŠŠã€Œå®¢æˆ·ç«¯å½“å‰ç™»å½•çš„è´¦å·ã€å¯¼å‡ºåˆ°äº‘ç«¯
-echo  ç”¨æ³•ï¼šå…ˆåœ¨æœ¬æ–‡ä»¶ä¸Šå³é”®-ç¼–è¾‘ï¼ŒæŠŠä¸‹é¢çš„ ALIAS æ”¹æˆ main æˆ– alt1
-echo        ç„¶åç¡®ä¿ WorkBuddy å®¢æˆ·ç«¯ç™»å½•çš„å°±æ˜¯è¦å¯¼å‡ºçš„é‚£ä¸ªå·
-echo ============================================
-echo.
-
 set "ALIAS=main"
 if not "%~1"=="" set "ALIAS=%~1"
-
-echo ç›®æ ‡æ¡£æ¡ˆåˆ«åï¼š%ALIAS%
-echo æ­£åœ¨è¯»å–å®¢æˆ·ç«¯å½“å‰ç™»å½•è´¦å·...
+echo.
+echo ============================================
+echo   µ¼³ö WorkBuddy ¿Í»§¶Ëµ±Ç°µÇÂ¼µÄÕËºÅ
+echo   ÓÃ·¨: µ¼³öµ±Ç°¿Í»§¶ËÕËºÅ.bat main
+echo         µ¼³öµ±Ç°¿Í»§¶ËÕËºÅ.bat alt1
+echo   ÇëÏÈÈ·ÈÏ¿Í»§¶ËµÇÂ¼µÄ¾ÍÊÇÒªµ¼³öµÄÄÇ¸öºÅ
+echo ============================================
+echo.
+echo Ä¿±êµµ°¸±ğÃû: %ALIAS%
 "%PYEXE%" checkin_accounts.py add --alias %ALIAS% --from-client --sync --run --wait 120
-
 echo.
 pause
