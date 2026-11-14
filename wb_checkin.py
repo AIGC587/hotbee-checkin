@@ -238,6 +238,15 @@ def main():
     rt_dir = (os.environ.get("WB_RT_DIR") or ".wb").strip()
     prune_markers(rt_dir)
 
+    # 全部账号今天都已有成功标记 → 立刻结束。必须在随机延迟之前判断：
+    # 否则每小时的兜底 cron 都会先睡 0~50 分钟再发现"已签"，白烧 Actions 额度。
+    if rt_dir:
+        pending = [n for n, rt in accounts
+                   if not os.path.exists(marker_path(rt_dir, n, sub_of_rt(rt) or n))]
+        if not pending:
+            print("[SKIP-RUN] 今日所有账号已签到成功，本次直接结束（未访问平台、未延迟）")
+            return 0
+
     # 防风控：云端运行时在窗口内随机延迟后再签到（本地手动运行不延迟）
     max_delay = int(os.environ.get("RANDOM_DELAY_MAX_SECONDS") or 0)
     if max_delay > 0:
