@@ -162,18 +162,35 @@ python checkin_accounts.py sync
 
 **原因**：HotBee 没有刷新接口，token 由浏览器会话维持（约两周量级）。浏览器仍在登录时，令牌会自动更新；云端拿的是旧副本，过期即失效。
 
-**处理（一条命令，推荐）**：
+**处理（一键，双击即可）**：
+
+双击项目目录里的 **`一键续期HotBee.bat`**，按窗口提示操作：
+
+1. 浏览器打开 https://hotbee.cn 并登录**要续期的那个账号**
+2. 按 F12 → Console → 粘贴 `copy(localStorage.getItem('token'))` → 回车（令牌进剪贴板）
+3. 回到黑色窗口，输入账号编号（`1` = 152\*\*\*\*2587，`2` = 198\*\*\*\*2587）→ 回车
+
+窗口会显示续期结果，并自动写入云端、触发一次签到。
+
+**两个账号 = 做两轮**：登录 A → 双击 → 选 1；退出登录换成 B → 双击 → 选 2。
+
+| 为什么需要 F12 那一步 | 说明 |
+| --- | --- |
+| 浏览器把令牌存在 localStorage | 但数据库已被压缩，脚本无法直接读出 |
+| 早期版本能读 | Chromium 把记录压实后就读不到了（2026-11 起失效） |
+| 所以改为剪贴板 | 页面里一行 JS 把令牌复制出来，脚本再取走 |
+
+> 剪贴板模式用的是 `hotbee-fix --alias <别名> --from-clipboard`；
+> 它按别名覆盖，不会动另一个账号。
+
+**命令行等价写法**（不想用 bat 时）：
 
 ```bash
-python checkin_accounts.py hotbee-fix            # 抓令牌 → 校验 → 写入云端 → 触发签到
-python checkin_accounts.py hotbee-fix --dry-run  # 只看浏览器里有哪些可用号
+python checkin_accounts.py hotbee-fix --alias hb1 --from-clipboard   # 剪贴板已有令牌时
+python checkin_accounts.py hotbee-fix --keep-all                    # 浏览器日志还能读到时的自动模式
 ```
 
-- 浏览器仍登录的账号会被自动修复，输出里 `sync.ok=true` 即成功，`run.conclusion=success` 表示云端已跑完。
-- 输出含 `missing_local` 时，说明这些号连浏览器登录态也丢了 → 按下面第 1 步登录后重跑同一条命令即可。
-- 想少一步：`--no-run` 只写云端不触发运行。
-
-**自动自愈（已内置）**：开机守护 `wb_boot_sync.py` 现在每轮都会校验 HotBee 令牌，发现失效就自动执行上面这套流程（失败间隔 6 小时，不会刷屏）。前提是浏览器里还留着登录态；浏览器也掉线时才需要人工登录一次。
+**自动自愈（已内置）**：开机守护 `wb_boot_sync.py` 每轮都会校验 HotBee 令牌，发现失效会尝试自动执行上面的流程（失败间隔 6 小时，不会刷屏）。但压缩数据库读不到时它也会失败，仍需双击 bat 手动续一次。
 
 **手动兜底（老流程，仍可用）**：
 
@@ -183,7 +200,7 @@ python import_hotbee.py             # 写入本地
 python checkin_accounts.py sync --with-hotbee --expect N --run   # N=本地实际账号数
 ```
 
-> `--expect` 是防呆：数量不符会中止，避免把云端账号挤掉。用 `hotbee-fix` 可跳过这个参数。
+> `--expect` 是防呆：数量不符会中止，避免把云端账号挤掉。
 
 **跨设备提醒**：令牌只在浏览器所在机器上更新。长期不开机时云端会持续失败（GitHub 会发失败邮件），回来后跑一次 `hotbee-fix` 即可。
 
