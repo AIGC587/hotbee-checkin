@@ -786,12 +786,28 @@ def cmd_peek(a):
     return 0
 
 
+def _clipboard_text():
+    """读 Windows 剪贴板（纯文本）。"""
+    import subprocess
+    try:
+        p = subprocess.run(
+            ["powershell", "-NoProfile", "-Command", "Get-Clipboard -Raw"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            timeout=20)
+        return (p.stdout or "").strip()
+    except Exception:
+        return ""
+
+
 def cmd_hotbee_fix(a):
     """一条命令自愈：从浏览器抓最新 HotBee 令牌 → 校验 → 入库 → 写云端 → 触发签到。
 
     典型用法（令牌过期报 [AUTH] 时）：
         python checkin_accounts.py hotbee-fix
     浏览器里已登录的账号会被自动修复；登录态也丢了的账号会列出来提示重新登录。
+
+    浏览器数据库被压缩、读不到时，可改用剪贴板模式（配合 一键续期HotBee.bat）：
+        python checkin_accounts.py hotbee-fix --alias hb1 --from-clipboard
     """
     import import_hotbee as ih
 
@@ -799,33 +815,68 @@ def cmd_hotbee_fix(a):
     report = {"status": "ok", "scanned": 0, "valid": [], "dead": [],
               "missing_local": [], "sync": None, "errors": []}
 
-    hits = {}
-    for d in ih.CANDIDATE_DIRS:
-        for hit in ih.scan_dir(d):
-            hits.setdefault(hit["token"], hit)
-    report["scanned"] = len(hits)
+    if getattr(a, "from_clipboard", False):
+        tok = _clipboard_text()
+        if not tok:
+            report["status"] = "need-login"
+            report["errors"].append("剪贴板为空。请先在浏览器执行 copy(localStorage.getItem('token'))")
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
+        ok, why = ih._validate(tok)
+        if not ok:
+            report["status"] = "need-login"
+            report["errors"].append("剪贴板里的令牌无效（%s），请确认已登录 hotbee.cn 后重新复制" % why)
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
+        alias = getattr(a, "alias", None)
+        if not alias:
+            report["status"] = "error"
+            report["errors"].append("剪贴板模式必须指定 --alias（如 hb1 / hb2）")
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 1
+        alias = safe_alias(alias)
+        old_idx = (load_index().get("hotbee") or {}).get(alias) or {}
+        report["updated"] = ["%s（剪贴板导入）" % alias]
+        report["valid"] = [{"id": old_idx.get("account_id"),
+                            "phone": (old_idx.get("phone") or "")[-4:]}]
+        report["scanned"] = 1
+        if a.dry_run:
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 0
+        upsert_hotbee(alias, tok, old_idx.get("phone"), old_idx.get("account_id"))
+    hits = {} if not getattr(a, "from_clipboard", False) else None
+    if hits is not None:
+        for d in ih.CANDIDATE_DIRS:
+            for hit in ih.scan_dir(d):
+                hits.setdefault(hit["token"], hit)
+        report["scanned"] = len(hits)
 
+    scan_mode = hits is not None
     by_id = {}
-    for tok, hit in hits.items():
-        ok, msg = ih._validate(tok)
-        hit["valid"], hit["why"] = ok, msg
-        key = hit.get("id") or tok
-        if key not in by_id or (ok and not by_id[key]["valid"]):
-            by_id[key] = hit
+    if scan_mode:
+        for tok, hit in hits.items():
+            ok, msg = ih._validate(tok)
+            hit["valid"], hit["why"] = ok, msg
+            key = hit.get("id") or tok
+            if key not in by_id or (ok and not by_id[key]["valid"]):
+                by_id[key] = hit
 
-    valid = [h for h in by_id.values() if h["valid"]]
-    dead = [h for h in by_id.values() if not h["valid"]]
-    for h in valid:
-        report["valid"].append({"id": h.get("id"), "phone": (h.get("phone") or "")[-4:]})
-    for h in dead:
-        report["dead"].append({"id": h.get("id"), "why": h.get("why")})
+        valid = [h for h in by_id.values() if h["valid"]]
+        dead = [h for h in by_id.values() if not h["valid"]]
+        for h in valid:
+            report["valid"].append({"id": h.get("id"), "phone": (h.get("phone") or "")[-4:]})
+        for h in dead:
+            report["dead"].append({"id": h.get("id"), "why": h.get("why")})
 
-    if not valid:
-        report["status"] = "need-login"
-        report["errors"].append(
-            "浏览器里没有可用的 HotBee 登录态。请先在浏览器登录 hotbee.cn，再跑本命令。")
-        print(json.dumps(report, ensure_ascii=False, indent=2))
-        return 2
+        if not valid:
+            report["status"] = "need-login"
+            report["errors"].append(
+                "浏览器里没有可用的 HotBee 登录态。请先在浏览器登录 hotbee.cn，再跑本命令；"
+                "若浏览器数据库已被压缩，请用 一键续期HotBee.bat（剪贴板模式）。")
+            print(json.dumps(report, ensure_ascii=False, indent=2))
+            return 2
+    else:
+        valid = []
 
     if a.dry_run:
         print(json.dumps(report, ensure_ascii=False, indent=2))
@@ -835,7 +886,7 @@ def cmd_hotbee_fix(a):
     idx = load_index()
     hb = idx.setdefault("hotbee", {})
     by_id_local = {str(m.get("account_id")): alias for alias, m in hb.items() if m.get("account_id")}
-    used = set()
+    used = {alias} if not scan_mode else set()
     for h in valid:
         acc = str(h.get("id") or "")
         alias = by_id_local.get(acc)
@@ -852,15 +903,25 @@ def cmd_hotbee_fix(a):
     idx = load_index()
     hb = idx.get("hotbee", {})
     valid_ids = {str(h.get("id") or "") for h in valid}
+    kept = []
     for alias in list(hb.keys()):
         if alias in used:
             continue
         acc = str((hb.get(alias) or {}).get("account_id") or "")
         if acc and acc in valid_ids:
             continue
+        if getattr(a, "keep_all", False) or not scan_mode:
+            # 一键分次续期模式：浏览器里只有当前登录的那个号，
+            # 其余账号原样保留，等切号后再跑一次，不能删。
+            tok = read_hotbee_token(alias)
+            alive = bool(tok) and ih._validate(tok)[0]
+            kept.append({"alias": alias, "token_alive": alive})
+            continue
         report["missing_local"].append(alias)
         hb.pop(alias, None)
     save_index(idx)
+    if kept:
+        report["kept_untouched"] = kept
 
     # 写云端 + 触发运行
     items, missing = build_accounts_json("hotbee")
@@ -1128,6 +1189,11 @@ def build_parser():
     pf.add_argument("--dry-run", action="store_true", help="只看浏览器里能读到哪些有效账号，不改任何东西")
     pf.add_argument("--no-run", dest="no_run", action="store_true", help="只写云端，不触发运行")
     pf.add_argument("--wait", type=int, default=120, help="等待运行结果秒数，默认 120")
+    pf.add_argument("--keep-all", dest="keep_all", action="store_true",
+                    help="保留浏览器里没有的账号（分次续期用：登录A跑一次，登录B再跑一次）")
+    pf.add_argument("--alias", help="剪贴板模式指定账号别名（hb1 / hb2）")
+    pf.add_argument("--from-clipboard", dest="from_clipboard", action="store_true",
+                    help="浏览器数据库压缩读不到时，从剪贴板取令牌")
     pf.set_defaults(fn=cmd_hotbee_fix)
 
     pp = sp.add_parser("peek", help="只读查看客户端当前登录账号的 sub 与积分（切号后确认身份）")
