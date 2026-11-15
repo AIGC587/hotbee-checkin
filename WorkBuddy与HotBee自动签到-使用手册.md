@@ -4,7 +4,7 @@
 | --- | --- |
 | 文档版本 | v2.0 |
 | 更新日期 | 2026-10-19 |
-| 适用仓库 | `AIGC587/hotbee-checkin`（Private） |
+| 适用仓库 | `AIGC587/hotbee-checkin`（**Public**，公开仓库的 Actions 免费不限量） |
 | 本地目录 | `E:\WorkBuddy\自动签到` |
 | 管理账号 | WorkBuddy 2 个 + HotBee 2 个 |
 
@@ -195,7 +195,24 @@ python checkin_accounts.py sync --with-hotbee --expect N --run   # N=本地实�
 
 **处理**：进入 Actions 页面点「Enable workflow」，或执行任意一次 `upload` 产生提交。
 
-### 3.5 快速对照表
+### 3.5 任务 2 秒失败、日志为空（Actions 额度）
+
+**症状**：每次运行都 `failure`，点进去看不到任何步骤，`runner_id` 为 0，耗时只有 2 秒左右；两个 workflow 同时挂。
+
+**原因**：GitHub 没有分配运行器。私有仓库每月只有 2000 分钟免费额度，用尽或账户账单受限时，任务会直接不启动——不是脚本报错。
+
+**处理**：把仓库设为 **Public**。公有仓库的 GitHub Actions 免费且不限量，本仓库内不含任何密钥（令牌都在 Secrets 里）。
+
+> 2026-11-14 实际发生过一次：11-08 之后所有运行全部 2 秒失败，改 Public 后立即恢复（run #174 起正常）。
+
+**检查是否为该问题**：
+
+```bash
+python checkin_accounts.py -h >/dev/null   # 任意命令确认脚本可跑
+# 然后看运行详情里有没有步骤；没有步骤就是额度问题
+```
+
+### 3.6 快速对照表
 
 | 报错 / 现象 | 凭据类型 | 处理章节 |
 | --- | --- | --- |
@@ -204,6 +221,7 @@ python checkin_accounts.py sync --with-hotbee --expect N --run   # N=本地实�
 | `sync` 返回 404 | PAT 未勾选该仓库 | 3.2 |
 | `[AUTH] 登录态失效` | HotBee token | 3.3 |
 | Actions 无新记录 | 定时任务被停用 | 3.4 |
+| 运行 2 秒失败、无任何步骤 | Actions 额度（仓库必须 Public） | 3.5 |
 
 ---
 
